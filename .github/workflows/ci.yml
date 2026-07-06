@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (100% coverage gate, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        # Hardware libraries (RPi.GPIO, pyserial, smbus2, spidev) are faked
+        # by the test suite, so only the test runner is needed here.
+        run: python -m pip install pytest pytest-cov
+
+      - name: Run tests (fails below 100% coverage)
+        run: python -m pytest

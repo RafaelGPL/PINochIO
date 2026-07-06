@@ -14,6 +14,8 @@
 
 *(And unlike its namesake, `status` never lies about a pin.)*
 
+[![CI](https://github.com/RafaelGPL/PINochIO/actions/workflows/ci.yml/badge.svg)](https://github.com/RafaelGPL/PINochIO/actions/workflows/ci.yml)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Zero%202%20W-c51a4a?logo=raspberrypi&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.7%2B-3776AB?logo=python&logoColor=white)
 ![Interface](https://img.shields.io/badge/interface-CLI%20%2B%20TUI-informational)
@@ -160,6 +162,19 @@ In the TUI, `:help i2c` opens a help overlay (any key closes it). Topics: `on`, 
 
 ## 🧪 Test
 
+### Unit tests — 100% coverage, enforced
+
+The suite (134 tests under [`tests/`](tests/)) covers every line of `gpioctl.py` — domain, application, adapters, CLI, and the TUI. Hardware libraries (`RPi.GPIO`, `pyserial`, `smbus2`, `spidev`) and `curses` are all faked in-memory, so the tests run anywhere, Pi or not:
+
+```bash
+pip3 install pytest pytest-cov
+pytest                        # fails if coverage drops below 100%
+```
+
+The coverage gate lives in [`pytest.ini`](pytest.ini) (`--cov-fail-under=100`) and is enforced on every push and pull request by the [CI workflow](.github/workflows/ci.yml) across Python 3.9, 3.11, and 3.12. If your PR leaves an untested line, the wooden boy's nose grows and the build goes red.
+
+### Manual smoke tests
+
 No Pi? No problem. The mock backend simulates the header on any machine (`--mock`, also auto-selected when `RPi.GPIO` is absent):
 
 ```bash
@@ -213,7 +228,7 @@ The domain depends on nothing but the `IGpioBackend` abstraction — swap in a `
 
 ## 🤝 Contributing
 
-PRs welcome. Keep the DDD layering intact (business rules stay in `GpioBoard`), run the mock-backend test commands above before submitting, and remember: every time you bypass the aggregate root, a wooden boy tells a lie.
+PRs welcome. Keep the DDD layering intact (business rules stay in `GpioBoard`), run `pytest` before submitting — CI rejects anything under 100% coverage — and remember: every time you bypass the aggregate root, a wooden boy tells a lie.
 
 ## 📜 License
 
