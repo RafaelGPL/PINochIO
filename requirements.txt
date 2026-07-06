@@ -1,0 +1,14 @@
+# PINochIO — Raspberry Pi Zero 2 W dependencies
+# Install on the Pi with: pip3 install -r requirements.txt
+
+# Core pin control & software PWM (pre-installed on Raspberry Pi OS)
+RPi.GPIO>=0.7.0
+
+# UART: `serial send` / `serial read` (TXD=GPIO14, RXD=GPIO15)
+pyserial>=3.5
+
+# I2C: `i2c scan/read/write` (SDA=GPIO2, SCL=GPIO3)
+smbus2>=0.4.0
+
+# SPI: `spi xfer` (SPI0 on GPIO7-11)
+spidev>=3.5

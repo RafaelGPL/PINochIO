@@ -46,6 +46,12 @@
 | `smbus2` | `i2c` commands | `pip install smbus2` |
 | `spidev` | `spi` commands | `pip install spidev` |
 
+Or grab everything in one go:
+
+```bash
+pip3 install -r requirements.txt
+```
+
 Enable the interfaces you plan to use with `sudo raspi-config` → *Interface Options* (Serial Port with login shell **disabled**, I2C, SPI).
 
 ## 🚀 Build & Install
