@@ -228,7 +228,7 @@ The domain depends on nothing but the `IGpioBackend` abstraction — swap in a `
 
 ## 🤝 Contributing
 
-PRs welcome. Keep the DDD layering intact (business rules stay in `GpioBoard`), run `pytest` before submitting — CI rejects anything under 100% coverage — and remember: every time you bypass the aggregate root, a wooden boy tells a lie.
+PRs welcome — this repo follows **git-flow** (see [CONTRIBUTING.md](CONTRIBUTING.md)): branch `feature/*` from `develop`, PR back into `develop`; releases and hotfixes are the only strings that reach `main`, and only through a PR with every CI check green. Keep the DDD layering intact (business rules stay in `GpioBoard`), run `pytest` before submitting — CI rejects anything under 100% coverage — and remember: every time you bypass the aggregate root, a wooden boy tells a lie.
 
 ## 📜 License
 
