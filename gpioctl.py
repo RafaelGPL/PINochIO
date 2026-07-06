@@ -28,6 +28,22 @@ Usage (CLI):
     gpioctl.py all-off
     gpioctl.py tui                        # interactive TUI
 
+Usage (Python import — drop gpioctl.py next to your script or on PYTHONPATH):
+    import gpioctl
+    gpioctl.on(17)                        # -> 1 (new level)
+    gpioctl.off(17)                       # -> 0
+    gpioctl.pwm(18, 128)                  # PWM while your process runs; 0 disables
+    gpioctl.read(4, pull="up")            # -> 0 or 1
+    gpioctl.serial_send("hello")          # -> bytes written
+    gpioctl.usage("pwm")                  # topic help ('usage', so it never
+                                          #  shadows Python's built-in help())
+
+Help (topic-based, same topics behind all three doors):
+    gpioctl.py help                       # overview + topic list
+    gpioctl.py help pwm                   # zero in on one command
+    gpioctl.usage("serial")               # from Python
+    :help i2c                             # from the TUI prompt
+
 Notes:
     * Software PWM (RPi.GPIO) lives inside this process. The `pwm` CLI command
       therefore holds the terminal until Ctrl+C; in the TUI, PWM persists while
@@ -598,7 +614,7 @@ class CommandInterpreter:
         "on <pin> | off <pin> | toggle <pin> | read <pin> [up|down] | "
         "pwm <pin> [0-255] | serial send <text> | serial read [secs] | "
         "i2c scan | i2c read <addr> <reg> | i2c write <addr> <reg> <val> | "
-        "spi xfer <b0> <b1> ... | alloff | help | quit"
+        "spi xfer <b0> <b1> ... | alloff | help [topic] | quit"
     )
 
     def __init__(self, gpio: GpioApplicationService, bus: BusApplicationService):
@@ -615,6 +631,8 @@ class CommandInterpreter:
             if cmd in ("quit", "q", "exit"):
                 return "bye", True
             if cmd in ("help", "h", "?"):
+                if len(parts) > 1:
+                    return usage_text(parts[1]), False   # multi-line -> TUI overlay
                 return self.HELP, False
             if cmd == "on":
                 return self._gpio.turn_on(int(parts[1])), False
@@ -651,6 +669,333 @@ class CommandInterpreter:
             return f"! {exc}", False
         except (IndexError, ValueError):
             return f"Bad arguments for {cmd!r}  (type 'help')", False
+
+
+# ============================================================================
+# [application] topic help — usage() / usage_text()
+# ============================================================================
+
+def _pins_help() -> str:
+    lines = ["pins — Raspberry Pi Zero 2 W BCM lines on the 40-pin header", ""]
+    for d in (PIN_TABLE[b] for b in sorted(PIN_TABLE)):
+        extra = f"  [RESERVED: {d.reserved}]" if d.reserved else ""
+        lines.append(f"  GPIO{d.bcm:<3} hdr {d.header:<3} {d.capability_summary}{extra}")
+    lines += ["", "PWM-capable: " + ", ".join(f"BCM{b}" for b in PWM_CAPABLE_PINS),
+              "UART: BCM14/15   I2C1: BCM2/3   SPI0: BCM7-11"]
+    return "\n".join(lines)
+
+
+HELP_TOPICS: Dict[str, str] = {
+    "overview": """\
+PINochIO (gpioctl) — Raspberry Pi Zero 2 W GPIO controller.
+
+Three ways to pull the strings:
+  1. Command line : python3 gpioctl.py on 17
+  2. Python import: import gpioctl; gpioctl.on(17)
+  3. Interactive  : python3 gpioctl.py tui   (press ':' for the prompt)
+
+Zero in on any topic:
+  CLI   : python3 gpioctl.py help <topic>
+  Python: gpioctl.usage("<topic>")
+  TUI   : :help <topic>
+
+Topics: on, off, toggle, read, pwm, status, all-off, serial, i2c, spi,
+        pins, tui, import, help""",
+
+    "on": """\
+on / off / toggle — drive a pin as a digital output
+
+CLI   : python3 gpioctl.py on 17
+        python3 gpioctl.py off 17
+        python3 gpioctl.py toggle 17
+Python: import gpioctl
+        gpioctl.on(17)        # -> 1 (new level)
+        gpioctl.off(17)       # -> 0
+        gpioctl.toggle(17)    # -> new level
+TUI   : arrows select a pin, then SPACE (toggle), '1' (on), '0' (off);
+        or from the ':' prompt: on 17
+Notes : pins are BCM numbers. Levels persist after the CLI exits.
+        BCM0/1 are reserved (HAT EEPROM) — needs --force / force=True.""",
+
+    "read": """\
+read — sample a pin as a digital input
+
+CLI   : python3 gpioctl.py read 4 --pull up      # pull: up | down | none
+Python: gpioctl.read(4, pull="up")    # -> 0 or 1
+TUI   : select the pin and press 'r'; or from the ':' prompt: read 4 up
+Notes : reading reconfigures the pin as an input (any PWM on it stops).""",
+
+    "pwm": f"""\
+pwm — pulse-width modulation on the PWM-capable pins
+      ({', '.join('BCM%d' % b for b in PWM_CAPABLE_PINS)})
+
+The value defaults to 0 (PWM disabled); 1-255 sets the duty cycle
+at {PWM_FREQUENCY_HZ} Hz.
+
+CLI   : python3 gpioctl.py pwm 18 128    # ~50% duty
+        python3 gpioctl.py pwm 18        # 0 -> PWM off, pin driven low
+        (software PWM lives in the process: the CLI holds until Ctrl+C)
+Python: gpioctl.pwm(18, 128)             # runs while your process lives
+        gpioctl.pwm(18)                  # off
+TUI   : select the pin, then +/- to nudge by 15 or 'p' for an exact
+        value; or from the ':' prompt: pwm 18 128
+Errors: non-PWM pins -> PwmNotSupportedException; outside 0-255 ->
+        InvalidPwmValueException.""",
+
+    "status": """\
+status — table of every pin: mode, level, PWM value, special functions
+
+CLI   : python3 gpioctl.py status
+Python: for p in gpioctl.status():       # list of PinStatusDto
+            print(p.bcm, p.mode, p.level, p.pwm_value)
+TUI   : the main screen *is* a live status table.""",
+
+    "all-off": """\
+all-off — switch every active output/PWM pin low (curtain call)
+
+CLI   : python3 gpioctl.py all-off
+Python: gpioctl.all_off()     # -> list of BCM numbers switched off
+TUI   : from the ':' prompt: alloff""",
+
+    "serial": """\
+serial — UART on GPIO14 (TXD) / GPIO15 (RXD), default port /dev/serial0
+
+CLI   : python3 gpioctl.py serial send "hello" --baud 115200
+        python3 gpioctl.py serial read --seconds 5
+Python: gpioctl.serial_send("hello", baud=115200)   # -> bytes written
+        gpioctl.serial_read(seconds=5)              # -> bytes received
+TUI   : from the ':' prompt: serial send hello  |  serial read 5
+Needs : pyserial; enable the UART via 'sudo raspi-config'
+        (Interface Options -> Serial Port: login shell OFF, port ON).""",
+
+    "i2c": """\
+i2c — I2C1 bus on GPIO2 (SDA) / GPIO3 (SCL)
+
+CLI   : python3 gpioctl.py i2c scan
+        python3 gpioctl.py i2c read 0x48 0x00
+        python3 gpioctl.py i2c write 0x48 0x01 0xFF
+Python: gpioctl.i2c_scan()                 # -> [72, ...] (int addresses)
+        gpioctl.i2c_read(0x48, 0x00)       # -> int
+        gpioctl.i2c_write(0x48, 0x01, 0xFF)
+TUI   : from the ':' prompt: i2c scan | i2c read 0x48 0x00 | i2c write ...
+Needs : smbus2; enable I2C via 'sudo raspi-config'.""",
+
+    "spi": """\
+spi — SPI0 on GPIO9 (MISO) / GPIO10 (MOSI) / GPIO11 (SCLK),
+      CE0 = GPIO8, CE1 = GPIO7
+
+CLI   : python3 gpioctl.py spi xfer 0x9F 0x00 0x00 \\
+            [--bus 0 --device 0 --speed 500000]
+Python: gpioctl.spi_xfer([0x9F, 0x00, 0x00])   # -> received bytes (list)
+TUI   : from the ':' prompt: spi xfer 0x9F 0x00 0x00
+Needs : spidev; enable SPI via 'sudo raspi-config'.""",
+
+    "pins": "",   # filled in below (built from PIN_TABLE)
+
+    "tui": """\
+tui — the interactive marionette theatre
+
+CLI   : python3 gpioctl.py tui        (add --mock off the Pi)
+Keys  : arrows/j/k select | SPACE toggle | 1 on | 0 off | +/- PWM +-15
+        p exact PWM | r read | : command prompt | q quit
+Prompt: ':' accepts every CLI command, plus 'help <topic>' — topic help
+        opens an overlay (press any key to close it).""",
+
+    "import": """\
+import — use PINochIO as a library in your own project
+
+    import gpioctl              # gpioctl.py next to your script/PYTHONPATH
+
+    gpioctl.on(17)                       # -> 1
+    gpioctl.pwm(18, 128)                 # PWM while your process runs
+    level = gpioctl.read(4, pull="up")   # -> 0 or 1
+    gpioctl.serial_send("hi")
+    gpioctl.all_off()
+    gpioctl.release()                    # stop PWM threads on shutdown
+
+Advanced:
+    gpioctl.configure(mock=True)         # force the simulator (call first)
+    board = gpioctl.GpioBoard(gpioctl.create_backend())   # own aggregate
+Errors: functions raise gpioctl.GpioDomainException subclasses
+        (PwmNotSupportedException, PinReservedException, ...).
+Help  : gpioctl.usage() / gpioctl.usage("pwm") — named 'usage' so it
+        never shadows Python's built-in help().""",
+
+    "help": """\
+help — topic help, three doors in
+
+CLI   : python3 gpioctl.py help [topic]
+Python: gpioctl.usage("[topic]")         # or usage_text() for the string
+TUI   : :help [topic]
+
+Topics: on, off, toggle, read, pwm, status, all-off, serial, i2c, spi,
+        pins, tui, import, help""",
+}
+HELP_TOPICS["pins"] = _pins_help()
+
+_TOPIC_ALIASES = {
+    "off": "on", "toggle": "on", "switch": "on",
+    "alloff": "all-off", "all_off": "all-off",
+    "uart": "serial", "module": "import", "scripting": "import",
+    "library": "import", "api": "import", "usage": "help",
+    "pin": "pins", "gpio": "pins", "interactive": "tui",
+}
+
+
+def usage_text(topic: Optional[str] = None) -> str:
+    """Return the help text for a topic (None -> overview)."""
+    if topic is None:
+        return HELP_TOPICS["overview"]
+    key = topic.lower().strip()
+    key = _TOPIC_ALIASES.get(key, key)
+    if key not in HELP_TOPICS:
+        return (f"Unknown help topic {topic!r}.\n\n"
+                f"Topics: {', '.join(sorted(HELP_TOPICS))}")
+    return HELP_TOPICS[key]
+
+
+def usage(topic: Optional[str] = None) -> None:
+    """Print topic help. Named 'usage' so it never shadows built-in help()."""
+    print(usage_text(topic))
+
+
+# ============================================================================
+# [public API] import gpioctl — call the strings directly from your code
+# ============================================================================
+
+__all__ = [
+    "on", "off", "toggle", "read", "pwm", "status", "all_off", "release",
+    "configure", "usage", "usage_text",
+    "serial_send", "serial_read", "i2c_scan", "i2c_read", "i2c_write", "spi_xfer",
+    "GpioBoard", "GpioApplicationService", "BusApplicationService",
+    "create_backend", "PIN_TABLE", "PWM_CAPABLE_PINS",
+    "GpioDomainException", "PinNotFoundException", "PinReservedException",
+    "PwmNotSupportedException", "InvalidPwmValueException",
+    "BusUnavailableException",
+]
+
+_module_board: Optional[GpioBoard] = None
+_module_mock: bool = False
+
+
+def configure(mock: bool = False) -> None:
+    """Choose the backend for the module-level functions (default: auto-detect).
+
+    Call before the first pin function; calling later resets the board.
+    """
+    global _module_board, _module_mock
+    if _module_board is not None:
+        _module_board.release()
+    _module_board = None
+    _module_mock = mock
+
+
+def _board() -> GpioBoard:
+    global _module_board
+    if _module_board is None:
+        _module_board = GpioBoard(create_backend(_module_mock))
+    return _module_board
+
+
+def on(pin: int, force: bool = False) -> int:
+    """Drive a pin high. Returns the new level (1)."""
+    return _board().switch_on(pin, force).level
+
+
+def off(pin: int, force: bool = False) -> int:
+    """Drive a pin low. Returns the new level (0)."""
+    return _board().switch_off(pin, force).level
+
+
+def toggle(pin: int, force: bool = False) -> int:
+    """Toggle a pin. Returns the new level."""
+    return _board().toggle(pin, force).level
+
+
+def read(pin: int, pull: str = "none", force: bool = False) -> int:
+    """Read a pin as an input ('up'/'down'/'none' pull). Returns 0 or 1."""
+    return _board().read(pin, pull, force)
+
+
+def pwm(pin: int, value: int = 0, force: bool = False) -> int:
+    """Set PWM on a PWM-capable pin. value 0 (default) disables; 1-255 = duty.
+
+    Software PWM runs only while your process lives. Returns the PWM value.
+    """
+    return _board().set_pwm(pin, value, force).pwm_value
+
+
+def all_off(force: bool = False) -> List[int]:
+    """Switch every active output/PWM pin low. Returns the BCM numbers touched."""
+    return _board().all_off(force)
+
+
+def status() -> List[PinStatusDto]:
+    """Snapshot of every pin as PinStatusDto objects."""
+    return GpioApplicationService(_board()).status()
+
+
+def release() -> None:
+    """Stop any running PWM threads (call on shutdown)."""
+    if _module_board is not None:
+        _module_board.release()
+
+
+def serial_send(text: str, port: str = DEFAULT_SERIAL_PORT,
+                baud: int = DEFAULT_BAUD, newline: bool = True) -> int:
+    """Send text over the UART (TXD=GPIO14). Returns bytes written."""
+    uart = SerialPortAdapter(port, baud)
+    try:
+        return uart.send(text, newline)
+    finally:
+        uart.close()
+
+
+def serial_read(seconds: float = 3.0, port: str = DEFAULT_SERIAL_PORT,
+                baud: int = DEFAULT_BAUD) -> bytes:
+    """Read from the UART (RXD=GPIO15) for `seconds`. Returns raw bytes."""
+    uart = SerialPortAdapter(port, baud)
+    try:
+        return uart.read_for(seconds)
+    finally:
+        uart.close()
+
+
+def i2c_scan(bus: int = 1) -> List[int]:
+    """Scan the I2C bus (SDA=GPIO2, SCL=GPIO3). Returns found addresses."""
+    adapter = I2cBusAdapter(bus)
+    try:
+        return adapter.scan()
+    finally:
+        adapter.close()
+
+
+def i2c_read(addr: int, reg: int, bus: int = 1) -> int:
+    """Read one register byte from an I2C device."""
+    adapter = I2cBusAdapter(bus)
+    try:
+        return adapter.read_register(addr, reg)
+    finally:
+        adapter.close()
+
+
+def i2c_write(addr: int, reg: int, value: int, bus: int = 1) -> None:
+    """Write one register byte to an I2C device."""
+    adapter = I2cBusAdapter(bus)
+    try:
+        adapter.write_register(addr, reg, value)
+    finally:
+        adapter.close()
+
+
+def spi_xfer(data: List[int], bus: int = 0, device: int = 0,
+             speed: int = 500000) -> List[int]:
+    """Full-duplex SPI transfer on SPI0. Returns the received bytes."""
+    adapter = SpiBusAdapter(bus, device, speed)
+    try:
+        return adapter.transfer(data)
+    finally:
+        adapter.close()
 
 
 # ============================================================================
@@ -699,6 +1044,9 @@ class GpioTui:
                 break
 
     def _handle_key(self, stdscr, curses, key) -> bool:
+        if "\n" in self._message:   # help overlay open — any key closes it
+            self._message = "Help closed — ':help <topic>' any time."
+            return True
         pins = self._gpio.status()
         pin = pins[self._selected]
         try:
@@ -802,8 +1150,27 @@ class GpioTui:
                            curses.color_pair(6) if selected else caps_attr)
 
         stdscr.addnstr(h - 3, 0, TUI_KEY_HELP[:w - 1], w - 1, curses.A_REVERSE)
-        stdscr.addnstr(h - 2, 0, f" {self._message}", w - 1, curses.A_BOLD)
+        first_line = self._message.splitlines()[0] if self._message else ""
+        stdscr.addnstr(h - 2, 0, f" {first_line}", w - 1, curses.A_BOLD)
+        if "\n" in self._message:
+            self._draw_help_overlay(stdscr, curses)
         stdscr.refresh()
+
+    def _draw_help_overlay(self, stdscr, curses):
+        lines = self._message.splitlines()
+        h, w = stdscr.getmaxyx()
+        box_w = min(w - 2, max(len(l) for l in lines) + 4)
+        box_h = min(h - 2, len(lines) + 2)
+        y0 = max(0, (h - box_h) // 2)
+        x0 = max(0, (w - box_w) // 2)
+        for i in range(box_h):
+            stdscr.addnstr(y0 + i, x0, " " * box_w, box_w, curses.A_REVERSE)
+        for i, line in enumerate(lines[:box_h - 2]):
+            stdscr.addnstr(y0 + 1 + i, x0 + 2, line, max(1, box_w - 4),
+                           curses.A_REVERSE)
+        footer = " any key to close "
+        stdscr.addnstr(y0 + box_h - 1, x0 + max(0, (box_w - len(footer)) // 2),
+                       footer, max(1, box_w - 1), curses.A_REVERSE | curses.A_BOLD)
 
 
 # ============================================================================
@@ -848,6 +1215,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("all-off", help="switch every active output/PWM pin off")
     sub.add_parser("tui", help="launch the interactive TUI")
 
+    sp = sub.add_parser("help", help="topic help, e.g. 'help pwm' (see 'help help')")
+    sp.add_argument("topic", nargs="?", default=None,
+                    help=f"one of: {', '.join(sorted(HELP_TOPICS))}")
+
     sp = sub.add_parser("serial", help="UART on GPIO14 (TXD) / GPIO15 (RXD)")
     ssub = sp.add_subparsers(dest="serial_command", required=True)
     s_send = ssub.add_parser("send")
@@ -883,6 +1254,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.command == "help":          # no backend needed for help
+        print(usage_text(args.topic))
+        return 0
 
     backend = create_backend(force_mock=args.mock)
     board = GpioBoard(backend)

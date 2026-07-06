@@ -33,6 +33,8 @@
 - 🖥️ **Interactive TUI** — live color-coded table of every pin with keyboard control *and* an embedded `:` command prompt
 - 📡 **Alternate functions** — UART send/receive, I²C scan/read/write, SPI transfers
 - 🛡️ **Guard rails** — the HAT-EEPROM pins (BCM 0/1) are protected behind `--force`, PWM values are range-checked, non-PWM pins tell you which pins *do* support it
+- 🧩 **Importable** — `import gpioctl; gpioctl.on(17)` from any Python project, no CLI required
+- 🆘 **Topic-based help** — `help pwm` on the CLI, `gpioctl.usage("pwm")` in Python, `:help pwm` in the TUI
 - 🧪 **Mock backend** — runs on any machine without a Pi, so you can rehearse the show before opening night
 - 📦 **Zero-install core** — one file, standard library + `RPi.GPIO` (pre-installed on Raspberry Pi OS)
 
@@ -122,6 +124,39 @@ The value argument **defaults to 0, meaning PWM off**. Anything from 1–255 ena
 | `r` | read the selected pin as input |
 | `:` | open the command prompt — accepts every CLI command (`on 17`, `pwm 18 200`, `serial send hi`, `i2c scan`, …) |
 | `q` | quit |
+
+## 📚 Use as a library
+
+No strings attached to the CLI either — drop `gpioctl.py` next to your code (or on `PYTHONPATH`) and import it:
+
+```python
+import gpioctl
+
+gpioctl.on(17)                    # -> 1 (new level)
+gpioctl.pwm(18, 128)              # PWM while your process runs; 0 disables
+level = gpioctl.read(4, pull="up")
+gpioctl.serial_send("hello")      # -> bytes written
+gpioctl.i2c_scan()                # -> [0x48, ...]
+gpioctl.all_off()
+gpioctl.release()                 # stop PWM threads on shutdown
+```
+
+Functions return values (levels, bytes, address lists) rather than printed strings, and raise `gpioctl.GpioDomainException` subclasses on bad input. `gpioctl.configure(mock=True)` forces the simulator — handy in unit tests. The DDD building blocks (`GpioBoard`, `create_backend`, the adapters) are also exported if you want to wire your own aggregate.
+
+## 🆘 Built-in help
+
+Topic-based help with sub-commands, reachable from all three doors — in Python it's named `usage()` so it never shadows the built-in `help()`:
+
+```bash
+python3 gpioctl.py help           # overview + topic list
+python3 gpioctl.py help pwm       # zero in on one command
+```
+
+```python
+gpioctl.usage("serial")           # same topics from Python
+```
+
+In the TUI, `:help i2c` opens a help overlay (any key closes it). Topics: `on`, `off`, `toggle`, `read`, `pwm`, `status`, `all-off`, `serial`, `i2c`, `spi`, `pins`, `tui`, `import`, `help` — plus friendly aliases like `uart`, `alloff`, and `scripting`.
 
 ## 🧪 Test
 
