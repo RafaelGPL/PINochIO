@@ -58,7 +58,31 @@ pip3 install -r requirements.txt
 
 Enable the interfaces you plan to use with `sudo raspi-config` → *Interface Options* (Serial Port with login shell **disabled**, I2C, SPI).
 
-## 🚀 Build & Install
+## 🚀 Install
+
+### Via pip (recommended)
+
+```bash
+pip3 install pinochio          # library + CLI anywhere (mock backend off the Pi)
+pip3 install "pinochio[pi]"    # on the Pi: pulls RPi.GPIO, pyserial, smbus2, spidev
+```
+
+That gives you the `pinochio` console command (with a `gpioctl` alias) and both import names:
+
+```bash
+pinochio status
+pinochio on 17
+pinochio tui
+```
+
+```python
+import pinochio          # or: import gpioctl — same API
+pinochio.pwm(18, 128)
+```
+
+> On Raspberry Pi OS Bookworm, system Python is externally managed — install inside a venv (`python3 -m venv --system-site-packages ~/env`) or add `--break-system-packages`.
+
+### Via copy (no install)
 
 There is no build — PINochIO is a single script. Get it onto the Pi and make it executable:
 

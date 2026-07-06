@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinochio"
+dynamic = ["version"]
+description = "The GPIO puppet-master for the Raspberry Pi Zero 2 W — CLI, TUI, and library. It has no strings, yet it lets you pull all 40 of them."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Rafael Gonzalez" }]
+requires-python = ">=3.9"
+keywords = ["raspberry-pi", "gpio", "pwm", "tui", "i2c", "spi", "uart", "pi-zero"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Hardware",
+    "Topic :: Software Development :: Embedded Systems",
+]
+# Base install has no hard dependencies: the mock backend runs anywhere.
+dependencies = []
+
+[project.optional-dependencies]
+# On the Pi: pip3 install "pinochio[pi]"
+pi = ["RPi.GPIO>=0.7.0", "pyserial>=3.5", "smbus2>=0.4.0", "spidev>=3.5"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/RafaelGPL/PINochIO"
+Repository = "https://github.com/RafaelGPL/PINochIO"
+Issues = "https://github.com/RafaelGPL/PINochIO/issues"
+
+[project.scripts]
+pinochio = "gpioctl:main"
+gpioctl = "gpioctl:main"
+
+[tool.setuptools]
+py-modules = ["gpioctl", "pinochio"]
+
+[tool.setuptools.dynamic]
+version = { attr = "gpioctl.__version__" }

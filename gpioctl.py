@@ -60,6 +60,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
+__version__ = "1.0.0"
+
 PWM_FREQUENCY_HZ = 1000
 DEFAULT_SERIAL_PORT = "/dev/serial0"
 DEFAULT_BAUD = 115200

@@ -6,3 +6,6 @@ coverage.xml
 htmlcov/
 .venv/
 venv/
+dist/
+build/
+*.egg-info/
