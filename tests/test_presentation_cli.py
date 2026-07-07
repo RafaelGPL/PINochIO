@@ -58,6 +58,14 @@ class TestPinCommands:
         assert run(["--mock", "all-off"]) == 0
         assert "Switched off" in capsys.readouterr().out
 
+    def test_self_test(self, monkeypatch, capsys):
+        monkeypatch.setattr(gpioctl.time, "sleep", lambda seconds: None)
+        assert run(["--mock", "test"]) == 0
+        out = capsys.readouterr().out
+        assert "Self-test: GPIO2 -> 1" in out
+        assert "heartbeat" in out
+        assert "Self-test complete" in out
+
 
 class TestHelpCommand:
     def test_overview(self, capsys):

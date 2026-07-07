@@ -39,6 +39,44 @@ class TestGpioApplicationService:
         assert gpio_service.status()[18].pwm_value == 0
 
 
+class TestSelfTest:
+    def test_blinks_every_non_reserved_pin_one_second_apart(self, board):
+        sleeps, events = [], []
+        service = gpioctl.GpioApplicationService(board, sleep=sleeps.append)
+        message = service.run_self_test(observer=events.append)
+        assert "Self-test complete: 26 pins blinked" in message
+        assert events[0] == "Self-test: GPIO2 -> 1"
+        assert events[1] == "Self-test: GPIO2 -> 0"
+        assert sleeps.count(gpioctl.SELF_TEST_BLINK_SECONDS) == 26
+
+    def test_heartbeat_pulses_pwm_pins_for_five_seconds(self, board):
+        sleeps = []
+        service = gpioctl.GpioApplicationService(board, sleep=sleeps.append)
+        events = []
+        service.run_self_test(observer=events.append)
+        heartbeats = [e for e in events if "heartbeat" in e]
+        assert len(heartbeats) == gpioctl.SELF_TEST_HEARTBEAT_SECONDS
+        assert "GPIO12, GPIO13, GPIO18, GPIO19" in heartbeats[0]
+        # 26 blink sleeps + 5 cycles x 5 pattern steps, one second per cycle
+        assert len(sleeps) == 26 + 5 * len(gpioctl.SELF_TEST_HEARTBEAT_PATTERN)
+        assert abs(sum(sleeps) - 31.0) < 1e-9
+
+    def test_everything_ends_switched_off(self, board):
+        service = gpioctl.GpioApplicationService(board, sleep=lambda s: None)
+        service.run_self_test()
+        assert all(p.level == 0 for p in board.all_pins())
+        assert board.pin(18).pwm_value == 0
+
+    def test_reserved_pins_are_skipped(self, board):
+        service = gpioctl.GpioApplicationService(board, sleep=lambda s: None)
+        service.run_self_test()
+        assert board.pin(0).mode == gpioctl.PinMode.UNSET
+
+    def test_default_observer_is_silent(self, board):
+        service = gpioctl.GpioApplicationService(board, sleep=lambda s: None)
+        assert "complete" in service.run_self_test()
+
+
 class TestBusApplicationService:
     def test_serial_send(self, bus_service, fake_serial):
         assert "Sent 3 bytes" in bus_service.serial_send("hi")
@@ -104,6 +142,15 @@ class TestCommandInterpreter:
     def test_alloff(self, interpreter):
         assert "Switched off" in interpreter.execute("alloff")[0]
 
+    def test_self_test_command(self, interpreter):
+        assert "Self-test complete" in interpreter.execute("test")[0]
+
+    def test_self_test_alias_reports_to_observer(self, interpreter):
+        events = []
+        interpreter.observer = events.append
+        assert "Self-test complete" in interpreter.execute("selftest")[0]
+        assert any("heartbeat" in e for e in events)
+
     def test_serial_commands(self, interpreter, fake_serial):
         assert "Sent" in interpreter.execute("serial send hello world")[0]
         assert "No data" in interpreter.execute("serial read 0.01")[0]
@@ -137,6 +184,10 @@ class TestUsageHelp:
     def test_alias_resolution(self):
         assert gpioctl.usage_text("uart") == gpioctl.usage_text("serial")
         assert gpioctl.usage_text("scripting") == gpioctl.usage_text("import")
+        assert gpioctl.usage_text("selftest") == gpioctl.usage_text("test")
+
+    def test_self_test_topic(self):
+        assert "heartbeat" in gpioctl.usage_text("test")
 
     def test_unknown_topic(self):
         assert "Unknown help topic" in gpioctl.usage_text("bogus")
