@@ -60,11 +60,17 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 PWM_FREQUENCY_HZ = 1000
 DEFAULT_SERIAL_PORT = "/dev/serial0"
 DEFAULT_BAUD = 115200
+
+SELF_TEST_BLINK_SECONDS = 1.0
+SELF_TEST_HEARTBEAT_SECONDS = 5
+SELF_TEST_HEARTBEAT_PATTERN = [   # one 1-second "lub-dub": (PWM value, seconds)
+    (255, 0.12), (60, 0.12), (180, 0.14), (40, 0.12), (0, 0.50),
+]
 
 
 # ============================================================================
@@ -509,8 +515,9 @@ class PinStatusDto:
 class GpioApplicationService:
     """Orchestrates pin use cases against the GpioBoard aggregate."""
 
-    def __init__(self, board: GpioBoard):
+    def __init__(self, board: GpioBoard, sleep=None):
         self._board = board
+        self._sleep = sleep if sleep is not None else time.sleep
 
     def turn_on(self, bcm: int, force=False) -> str:
         self._board.switch_on(bcm, force)
@@ -537,6 +544,31 @@ class GpioApplicationService:
     def all_off(self, force=False) -> str:
         touched = self._board.all_off(force)
         return f"Switched off: {', '.join('GPIO%d' % b for b in touched) or 'nothing active'}"
+
+    def run_self_test(self, observer=None) -> str:
+        """Blink every non-reserved pin high/low (1s apart), then pulse a
+        heartbeat on the PWM-capable pins for 5 seconds. Ends with all pins off.
+        """
+        notify = observer or (lambda message: None)
+        testable = [p.bcm for p in self._board.all_pins() if not p.definition.reserved]
+        for bcm in testable:
+            notify(f"Self-test: GPIO{bcm} -> 1")
+            self._board.switch_on(bcm)
+            self._sleep(SELF_TEST_BLINK_SECONDS)
+            self._board.switch_off(bcm)
+            notify(f"Self-test: GPIO{bcm} -> 0")
+        pwm_names = ", ".join(f"GPIO{b}" for b in PWM_CAPABLE_PINS)
+        for cycle in range(SELF_TEST_HEARTBEAT_SECONDS):
+            notify(f"Self-test: heartbeat on {pwm_names} "
+                   f"({cycle + 1}/{SELF_TEST_HEARTBEAT_SECONDS})")
+            for value, seconds in SELF_TEST_HEARTBEAT_PATTERN:
+                for bcm in PWM_CAPABLE_PINS:
+                    self._board.set_pwm(bcm, value)
+                self._sleep(seconds)
+        self._board.all_off()
+        return (f"Self-test complete: {len(testable)} pins blinked, "
+                f"heartbeat on {len(PWM_CAPABLE_PINS)} PWM pins for "
+                f"{SELF_TEST_HEARTBEAT_SECONDS}s")
 
     def status(self) -> List[PinStatusDto]:
         return [
@@ -616,12 +648,14 @@ class CommandInterpreter:
         "on <pin> | off <pin> | toggle <pin> | read <pin> [up|down] | "
         "pwm <pin> [0-255] | serial send <text> | serial read [secs] | "
         "i2c scan | i2c read <addr> <reg> | i2c write <addr> <reg> <val> | "
-        "spi xfer <b0> <b1> ... | alloff | help [topic] | quit"
+        "spi xfer <b0> <b1> ... | alloff | test | help [topic] | quit"
     )
 
-    def __init__(self, gpio: GpioApplicationService, bus: BusApplicationService):
+    def __init__(self, gpio: GpioApplicationService, bus: BusApplicationService,
+                 observer=None):
         self._gpio = gpio
         self._bus = bus
+        self.observer = observer   # called with each self-test step message
 
     def execute(self, line: str) -> Tuple[str, bool]:
         """Returns (message, should_quit)."""
@@ -650,6 +684,8 @@ class CommandInterpreter:
                 return self._gpio.set_pwm(int(parts[1]), value), False
             if cmd == "alloff":
                 return self._gpio.all_off(), False
+            if cmd in ("test", "selftest"):
+                return self._gpio.run_self_test(self.observer), False
             if cmd == "serial":
                 if parts[1] == "send":
                     return self._bus.serial_send(" ".join(parts[2:])), False
@@ -701,8 +737,8 @@ Zero in on any topic:
   Python: gpioctl.usage("<topic>")
   TUI   : :help <topic>
 
-Topics: on, off, toggle, read, pwm, status, all-off, serial, i2c, spi,
-        pins, tui, import, help""",
+Topics: on, off, toggle, read, pwm, status, all-off, test, serial, i2c,
+        spi, pins, tui, import, help""",
 
     "on": """\
 on / off / toggle — drive a pin as a digital output
@@ -792,6 +828,22 @@ Python: gpioctl.spi_xfer([0x9F, 0x00, 0x00])   # -> received bytes (list)
 TUI   : from the ':' prompt: spi xfer 0x9F 0x00 0x00
 Needs : spidev; enable SPI via 'sudo raspi-config'.""",
 
+    "test": f"""\
+test — self-test sequence: watch the whole header dance
+
+Blinks every non-reserved pin high then low, one second apart, walking
+the header sequentially. Then pulses a heartbeat (lub-dub) on the PWM
+pins ({', '.join('BCM%d' % b for b in PWM_CAPABLE_PINS)}) for
+{SELF_TEST_HEARTBEAT_SECONDS} seconds. Wire LEDs (with resistors!) to
+the pins you want to verify. Everything ends switched off.
+
+CLI   : python3 gpioctl.py test        # ~30s, prints each step
+Python: service = gpioctl.GpioApplicationService(
+            gpioctl.GpioBoard(gpioctl.create_backend()))
+        service.run_self_test(observer=print)
+TUI   : from the ':' prompt: test      # the pin table animates live
+Notes : BCM0/1 (HAT EEPROM) are skipped.""",
+
     "pins": "",   # filled in below (built from PIN_TABLE)
 
     "tui": """\
@@ -830,13 +882,14 @@ CLI   : python3 gpioctl.py help [topic]
 Python: gpioctl.usage("[topic]")         # or usage_text() for the string
 TUI   : :help [topic]
 
-Topics: on, off, toggle, read, pwm, status, all-off, serial, i2c, spi,
-        pins, tui, import, help""",
+Topics: on, off, toggle, read, pwm, status, all-off, test, serial, i2c,
+        spi, pins, tui, import, help""",
 }
 HELP_TOPICS["pins"] = _pins_help()
 
 _TOPIC_ALIASES = {
     "off": "on", "toggle": "on", "switch": "on",
+    "selftest": "test", "self-test": "test",
     "alloff": "all-off", "all_off": "all-off",
     "uart": "serial", "module": "import", "scripting": "import",
     "library": "import", "api": "import", "usage": "help",
@@ -1039,6 +1092,10 @@ class GpioTui:
         curses.init_pair(5, curses.COLOR_MAGENTA, -1)  # reserved
         curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)  # selection bar
 
+        # live progress during ':test' — each step updates the pin table
+        self._interp.observer = (
+            lambda message: self._show_progress(stdscr, curses, message))
+
         while True:
             self._draw(stdscr, curses)
             key = stdscr.getch()
@@ -1085,6 +1142,10 @@ class GpioTui:
         except ValueError:
             self._message = "! Not a number."
         return True
+
+    def _show_progress(self, stdscr, curses, message: str) -> None:
+        self._message = message
+        self._draw(stdscr, curses)
 
     def _prompt(self, stdscr, curses, label: str) -> str:
         h, w = stdscr.getmaxyx()
@@ -1215,6 +1276,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="show all pins and capabilities")
     sub.add_parser("all-off", help="switch every active output/PWM pin off")
+    sub.add_parser("test",
+                   help="self-test: blink every pin 1s apart, then heartbeat "
+                        "the PWM pins for 5s (~30s total)")
     sub.add_parser("tui", help="launch the interactive TUI")
 
     sp = sub.add_parser("help", help="topic help, e.g. 'help pwm' (see 'help help')")
@@ -1288,6 +1352,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             _print_status(gpio.status())
         elif args.command == "all-off":
             print(gpio.all_off(args.force))
+        elif args.command == "test":
+            print(gpio.run_self_test(observer=print))
         elif args.command == "serial":
             if args.serial_command == "send":
                 print(bus.serial_send(args.text, args.port, args.baud))

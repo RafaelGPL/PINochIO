@@ -109,7 +109,11 @@ sudo cp gpioctl.py /usr/local/bin/pinochio
 ./gpioctl.py toggle 17
 ./gpioctl.py read 4 --pull up          # read GPIO4 with internal pull-up
 ./gpioctl.py all-off                   # curtain call — everything low
+./gpioctl.py test                      # self-test: blink every pin 1s apart,
+                                       # then heartbeat the PWM pins for 5s
 ```
+
+The same self-test runs inside the TUI (`:test`) with the pin table animating live as each string gets pulled.
 
 ### PWM (BCM 12, 13, 18, 19)
 

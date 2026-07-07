@@ -76,6 +76,20 @@ class TestKeyHandling:
         tui.run()
         assert tui._message.startswith("!")
 
+    def test_self_test_animates_the_table(self, gpio_service, bus_service,
+                                           fake_curses_factory, stdscr_cls):
+        keys = [ord(":"), ord("q")]
+        entries = [b"test"]
+        screen = stdscr_cls(keys=keys, entries=entries)
+        fake_curses_factory(screen)
+        tui = build_tui(gpio_service, bus_service)
+        tui.run()
+        assert "Self-test complete" in tui._message
+        # observer redrew the table during the sequence: 26 blink steps x 2
+        # messages + 5 heartbeat messages all passed through _show_progress
+        drawn = " ".join(screen.drawn)
+        assert "heartbeat" in drawn
+
     def test_help_overlay_consumes_next_key(self, gpio_service, bus_service,
                                             fake_curses_factory, stdscr_cls):
         keys = [ord(":"), ord("q"), ord("q")]   # 'q' during overlay only closes it

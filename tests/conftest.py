@@ -34,7 +34,8 @@ def board():
 
 @pytest.fixture
 def gpio_service(board):
-    return gpioctl.GpioApplicationService(board)
+    # no-op sleep so the self-test sequence runs instantly under test
+    return gpioctl.GpioApplicationService(board, sleep=lambda seconds: None)
 
 
 @pytest.fixture
